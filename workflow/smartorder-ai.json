@@ -1,0 +1,486 @@
+{
+  "name": "SmartOrder AI",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "06f03298-3c1a-4629-81e8-a47238b11c4a",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        240,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "1e788931-d9b2-423b-9939-d25e8033fe5c",
+              "name": "order_id",
+              "value": "SO-1042",
+              "type": "string"
+            },
+            {
+              "id": "bd0f6106-0b37-4166-89f2-d1d5a193a1c6",
+              "name": "customer_name",
+              "value": "Brightline Studios",
+              "type": "string"
+            },
+            {
+              "id": "2bc16828-4f19-49ea-9879-19bdb65ab331",
+              "name": "order_total",
+              "value": 600,
+              "type": "number"
+            },
+            {
+              "id": "701d6109-0ce6-4047-9306-79b5abbd4bb1",
+              "name": "system_prompt",
+              "value": "You are the decision engine for \"SmartOrder AI\", an automated order-processing system for a small e-commerce store. You receive a single incoming order plus a snapshot of current inventory, and you output exactly one structured decision that downstream automation will act on.\n\n# YOUR JOB\nFor each order you must:\n1. Classify the order into exactly ONE decision category.\n2. Identify any products that are at or below their low-stock threshold AFTER this order is fulfilled.\n3. Recommend concrete follow-up actions.\n4. Briefly explain your reasoning in one sentence.\n\n# DECISION CATEGORIES (choose exactly one, using this strict priority order)\nEvaluate in this order and stop at the first match:\n\n1. \"low_stock\" — Fulfilling this order brings one or more ordered products to OR below their low_stock_threshold. Stock health takes priority because a stockout costs future sales. This applies EVEN IF the order is also high value.\n2. \"high_value\" — The order's total value is greater than or equal to the high_value_threshold provided, AND it does not trigger low_stock.\n3. \"standard\" — Everything else: normal value, no stock concerns.\n\n# AVAILABLE ACTION TYPES\nUse only these action \"type\" values:\n- \"slack_alert\" — Notify the store owner in Slack. Use for low_stock and high_value orders.\n- \"email_supplier_draft\" — Draft a reorder email to the supplier. Use ONLY when low_stock is triggered.\n- \"customer_thank_you\" — Draft a personalized thank-you to the customer. Appropriate for high_value orders.\n- \"log_only\" — No active alert needed; just record it. Use for standard orders.\n\n# LOW STOCK ITEMS\n\"low_stock_items\" must list the product NAMES (exactly as given in inventory) that are at or below their low_stock_threshold after this order. If none, return an empty array [].\n\n# REORDER QUANTITY\n\"suggested_reorder_quantity\" applies only when low_stock is triggered. Suggest a whole number that brings the most-depleted low-stock item comfortably back above threshold (a reasonable rule: restock to roughly 3x the threshold). If low_stock is NOT triggered, return null.\n\n# OUTPUT FORMAT — CRITICAL\nRespond with ONE valid JSON object and NOTHING else. No markdown, no code fences, no commentary before or after. The object must match this schema exactly:\n\n{\n  \"decision\": \"low_stock\" | \"high_value\" | \"standard\",\n  \"reasoning\": \"one short sentence explaining the classification\",\n  \"actions\": [ { \"type\": \"<one of the allowed action types>\", \"details\": \"<what to do / what to say>\" } ],\n  \"low_stock_items\": [\"<product name>\", ...],\n  \"suggested_reorder_quantity\": <number or null>\n}\n\nRules:\n- \"actions\" must contain at least one entry.\n- Never invent product names or fields not present in the input.\n- Keep \"reasoning\" to a single sentence.\n- Output must be parseable by JSON.parse() with no modification.",
+              "type": "string"
+            },
+            {
+              "id": "19216bbe-d1bc-4d12-b6d6-d6b28566ceb7",
+              "name": "user_message",
+              "value": "Here is the incoming order and current inventory. Produce the decision JSON.\n\nTHRESHOLDS:\n- high_value_threshold: 200\n\nORDER:\n{\n  \"order_id\": \"SO-1042\",\n  \"customer_name\": \"Brightline Studios\",\n  \"items\": [\n    { \"product\": \"Wireless Mechanical Keyboard\", \"quantity\": 5, \"unit_price\": 120 }\n  ],\n  \"order_total\": 600\n}\n\nCURRENT INVENTORY:\n[\n  { \"name\": \"Wireless Mechanical Keyboard\", \"current_stock\": 14, \"low_stock_threshold\": 10 },\n  { \"name\": \"USB-C Hub (7-in-1)\", \"current_stock\": 40, \"low_stock_threshold\": 15 },\n  { \"name\": \"4K Webcam\", \"current_stock\": 8, \"low_stock_threshold\": 6 },\n  { \"name\": \"Noise-Cancelling Headphones\", \"current_stock\": 22, \"low_stock_threshold\": 8 },\n  { \"name\": \"Aluminum Laptop Stand\", \"current_stock\": 35, \"low_stock_threshold\": 12 },\n  { \"name\": \"Ergonomic Mouse\", \"current_stock\": 18, \"low_stock_threshold\": 10 }\n]",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "bbe4b3c1-3c2e-4ba1-b47f-901948b18c29",
+      "name": "Build Order + Inventory",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        460,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "anthropic-beta",
+              "value": "prompt-caching-2024-07-31"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={ \"model\": \"claude-haiku-4-5\", \"max_tokens\": 400, \"temperature\": 0, \"system\": [ { \"type\": \"text\", \"text\": {{ JSON.stringify($json.system_prompt) }}, \"cache_control\": { \"type\": \"ephemeral\" } } ], \"messages\": [ { \"role\": \"user\", \"content\": {{ JSON.stringify($json.user_message) }} }, { \"role\": \"assistant\", \"content\": \"{\" } ] }",
+        "options": {}
+      },
+      "id": "79b725c1-7e72-4a23-a6d5-94dbace8e031",
+      "name": "Call Claude",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        680,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Claude's JSON. The assistant turn was prefilled with \"{\", so the API\n// returns the JSON WITHOUT its opening brace — we prepend it back here.\nconst res = $input.first().json;\nconst modelUsed = res.model || 'claude-haiku-4-5';\n\nlet raw = '';\nif (res.content && res.content[0] && typeof res.content[0].text === 'string') {\n  raw = res.content[0].text;\n}\n\n// Prepend the consumed \"{\", strip any stray code fences, trim.\nlet jsonText = ('{' + raw).replace(/```json/gi, '').replace(/```/g, '').trim();\n\ntry {\n  const parsed = JSON.parse(jsonText);\n  return [{\n    json: {\n      decision: parsed.decision,\n      reasoning: parsed.reasoning,\n      actions: Array.isArray(parsed.actions) ? parsed.actions : [],\n      low_stock_items: Array.isArray(parsed.low_stock_items) ? parsed.low_stock_items : [],\n      suggested_reorder_quantity: (parsed.suggested_reorder_quantity === undefined ? null : parsed.suggested_reorder_quantity),\n      model_used: modelUsed,\n      raw_response: jsonText\n    }\n  }];\n} catch (err) {\n  return [{\n    json: {\n      parse_error: true,\n      decision: 'parse_error',\n      reasoning: 'Could not parse Claude output as JSON: ' + err.message,\n      actions: [],\n      low_stock_items: [],\n      suggested_reorder_quantity: null,\n      model_used: modelUsed,\n      raw_response: raw\n    }\n  }];\n}"
+      },
+      "id": "18d6c0ae-b0f5-4777-a55f-ee1034ac2790",
+      "name": "Parse Claude JSON",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "fe0ff997-6656-4901-bf62-6d0a2fa0f855",
+                    "leftValue": "={{ $json.decision }}",
+                    "rightValue": "low_stock",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "low_stock"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "35f0b159-665b-4aba-a79e-e7ae0e550ca0",
+                    "leftValue": "={{ $json.decision }}",
+                    "rightValue": "high_value",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "high_value"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "36176508-e949-4d7f-a6f1-c3c1d3606fba",
+                    "leftValue": "={{ $json.decision }}",
+                    "rightValue": "standard",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "standard"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "6bdd404b-8464-4e51-bebd-e3c7e99315e2",
+                    "leftValue": "={{ $json.decision }}",
+                    "rightValue": "parse_error",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "parse_error"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "5e8ef181-969d-4e65-bbe3-44a7954166b1",
+      "name": "Route by Decision",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        1120,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_WEBHOOK_URL }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={ \"text\": {{ JSON.stringify(\"🔴 *SmartOrder AI — LOW STOCK*\\n*Order:* \" + $('Build Order + Inventory').first().json.order_id + \"  —  \" + $('Build Order + Inventory').first().json.customer_name + \"  ($\" + $('Build Order + Inventory').first().json.order_total + \")\\n*Decision:* \" + $json.decision + \"\\n*Why:* \" + $json.reasoning + \"\\n*Low-stock items:* \" + ($json.low_stock_items || []).join(\", \") + \"\\n*Suggested reorder qty:* \" + $json.suggested_reorder_quantity + \"\\n*Actions:*\\n\" + ($json.actions || []).map(a => \"• \" + a.type + \": \" + a.details).join(\"\\n\")) }} }",
+        "options": {}
+      },
+      "id": "d6e38ccf-677c-4e20-ae60-9f7d0c9974a2",
+      "name": "Slack: Low Stock",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1360,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_WEBHOOK_URL }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={ \"text\": {{ JSON.stringify(\"🟢 *SmartOrder AI — HIGH VALUE ORDER*\\n*Order:* \" + $('Build Order + Inventory').first().json.order_id + \"  —  \" + $('Build Order + Inventory').first().json.customer_name + \"  ($\" + $('Build Order + Inventory').first().json.order_total + \")\\n*Decision:* \" + $json.decision + \"\\n*Why:* \" + $json.reasoning + \"\\n*Actions:*\\n\" + ($json.actions || []).map(a => \"• \" + a.type + \": \" + a.details).join(\"\\n\")) }} }",
+        "options": {}
+      },
+      "id": "3fcc26d6-9bbb-44cb-8e15-bd6f7dbc275a",
+      "name": "Slack: High Value",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1360,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_WEBHOOK_URL }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={ \"text\": {{ JSON.stringify(\"⚠️ *SmartOrder AI — PARSE ERROR*\\n*Order:* \" + $('Build Order + Inventory').first().json.order_id + \"  —  \" + $('Build Order + Inventory').first().json.customer_name + \"\\nClaude's response could not be parsed as JSON. Raw output was still logged to Supabase.\" + \"\\n*Detail:* \" + $json.reasoning) }} }",
+        "options": {}
+      },
+      "id": "04cafeae-87b8-4e13-b96e-58010c981ece",
+      "name": "Slack: Parse Error",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1360,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR-PROJECT.supabase.co/rest/v1/order_logs?on_conflict=order_id",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates,return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={ \"order_id\": {{ JSON.stringify($('Build Order + Inventory').first().json.order_id) }}, \"customer_name\": {{ JSON.stringify($('Build Order + Inventory').first().json.customer_name) }}, \"order_total\": {{ $('Build Order + Inventory').first().json.order_total }}, \"decision\": {{ JSON.stringify($('Parse Claude JSON').first().json.decision || \"\") }}, \"reasoning\": {{ JSON.stringify($('Parse Claude JSON').first().json.reasoning || \"\") }}, \"actions\": {{ JSON.stringify($('Parse Claude JSON').first().json.actions || []) }}, \"low_stock_items\": {{ JSON.stringify($('Parse Claude JSON').first().json.low_stock_items || []) }}, \"suggested_reorder_quantity\": {{ ($('Parse Claude JSON').first().json.suggested_reorder_quantity === undefined || $('Parse Claude JSON').first().json.suggested_reorder_quantity === null) ? null : $('Parse Claude JSON').first().json.suggested_reorder_quantity }}, \"model_used\": {{ JSON.stringify($('Parse Claude JSON').first().json.model_used || \"claude-haiku-4-5\") }}, \"raw_response\": {{ JSON.stringify($('Parse Claude JSON').first().json.raw_response || \"\") }} }",
+        "options": {}
+      },
+      "id": "162d832f-7025-4c19-b5f6-7ea1c637bdf9",
+      "name": "Log to order_logs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1600,
+        320
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "84576e34-f9ba-45ca-a7ca-ebbdb2a4b6ae",
+      "name": "Done",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1820,
+        320
+      ]
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Build Order + Inventory",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Order + Inventory": {
+      "main": [
+        [
+          {
+            "node": "Call Claude",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Claude": {
+      "main": [
+        [
+          {
+            "node": "Parse Claude JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Claude JSON": {
+      "main": [
+        [
+          {
+            "node": "Route by Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by Decision": {
+      "main": [
+        [
+          {
+            "node": "Slack: Low Stock",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Slack: High Value",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log to order_logs",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Slack: Parse Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack: Low Stock": {
+      "main": [
+        [
+          {
+            "node": "Log to order_logs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack: High Value": {
+      "main": [
+        [
+          {
+            "node": "Log to order_logs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack: Parse Error": {
+      "main": [
+        [
+          {
+            "node": "Log to order_logs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log to order_logs": {
+      "main": [
+        [
+          {
+            "node": "Done",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateId": "smartorder-ai-demo"
+  }
+}

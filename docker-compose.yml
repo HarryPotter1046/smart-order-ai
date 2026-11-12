@@ -1,0 +1,33 @@
+# SmartOrder AI — local n8n for the demo.
+#
+# Usage:
+#   1. cp .env.example .env        # then put your Slack webhook URL in .env
+#   2. docker compose up -d
+#   3. open http://localhost:5678
+#
+# Secrets: the Anthropic key and the Supabase service_role key are NOT here — they live in
+# n8n credentials (Header Auth + Custom Auth; see SETUP.md). The only secret n8n reads from
+# the environment is the Slack incoming-webhook URL, because a webhook URL can't be stored
+# in an n8n credential.
+
+services:
+  n8n:
+    image: docker.n8n.io/n8nio/n8n
+    container_name: n8n
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      # The one secret n8n needs as an env var. Read from your local .env (gitignored).
+      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL:-}
+      # REQUIRED so the Slack node's {{ $env.SLACK_WEBHOOK_URL }} expression can read the
+      # env var. n8n denies $env access in expressions unless this is explicitly false.
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
+      # Serve cleanly over http://localhost (no HTTPS in local dev) and silence the
+      # task-runner deprecation notice so logs stay tidy on camera.
+      - N8N_SECURE_COOKIE=false
+      - N8N_RUNNERS_ENABLED=true
+    volumes:
+      # Bind-mounts your host ~/.n8n so workflows + credentials persist across restarts
+      # (and reuses anything you already set up via `docker run -v ~/.n8n:...`).
+      - ~/.n8n:/home/node/.n8n
